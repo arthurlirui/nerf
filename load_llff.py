@@ -55,10 +55,7 @@ def _minify(basedir, factors=[], resolutions=[]):
             check_output('rm {}/*.{}'.format(imgdir, ext), shell=True)
             print('Removed duplicates')
         print('Done')
-            
-        
-        
-        
+
 def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     
     poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy'))
@@ -286,6 +283,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         tt = poses[:,:3,3] # ptstocam(poses[:3,3,:].T, c2w).T
         rads = np.percentile(np.abs(tt), 90, 0)
         c2w_path = c2w
+        #N_views = 120
         N_views = 120
         N_rots = 2
         if path_zflat:

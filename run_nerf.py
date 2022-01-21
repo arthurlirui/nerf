@@ -228,7 +228,7 @@ def render_rays(ray_batch,
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(
             raw, z_vals, rays_d)
 
-    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map}
+    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'depth_map': depth_map}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -330,7 +330,7 @@ def render(H, W, focal,
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = tf.reshape(all_ret[k], k_sh)
 
-    k_extract = ['rgb_map', 'disp_map', 'acc_map']
+    k_extract = ['rgb_map', 'disp_map', 'acc_map', 'depth_map']
     ret_list = [all_ret[k] for k in k_extract]
     ret_dict = {k: all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
@@ -353,8 +353,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     for i, c2w in enumerate(render_poses):
         print(i, time.time() - t)
         t = time.time()
-        rgb, disp, acc, _ = render(
-            H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
         rgbs.append(rgb.numpy())
         disps.append(disp.numpy())
         if i == 0:
@@ -373,6 +372,51 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     disps = np.stack(disps, 0)
 
     return rgbs, disps
+
+
+def render_path_volume(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
+
+    H, W, focal = hwf
+
+    if render_factor != 0:
+        # Render downsampled for speed
+        H = H//render_factor
+        W = W//render_factor
+        focal = focal/render_factor
+
+    rgbs = []
+    disps = []
+    depths = []
+
+    t = time.time()
+    for i, c2w in enumerate(render_poses):
+        print(i, time.time() - t)
+        t = time.time()
+        rgb, disp, acc, depth, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        rgbs.append(rgb.numpy())
+        disps.append(disp.numpy())
+        depths.append(depth.numpy())
+        if i == 0:
+            print(rgb.shape, disp.shape, depth.shape)
+
+        if gt_imgs is not None and render_factor == 0:
+            p = -10. * np.log10(np.mean(np.square(rgb - gt_imgs[i])))
+            print(p)
+
+        if savedir is not None:
+            rgb8 = to8b(rgbs[-1])
+            filename = os.path.join(savedir, '{:03d}.png'.format(i))
+            imageio.imwrite(filename, rgb8)
+
+            depth8 = todepth(depths[-1])
+            filename = os.path.join(savedir, '{:03d}_depth.png'.format(i))
+            imageio.imwrite(filename, depth8)
+
+    rgbs = np.stack(rgbs, 0)
+    disps = np.stack(disps, 0)
+    depths = np.stack(depths, 0)
+
+    return rgbs, disps, depths
 
 
 def create_nerf(args):
@@ -668,8 +712,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, models = create_nerf(
-        args)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, models = create_nerf(args)
 
     bds_dict = {
         'near': tf.cast(near, tf.float32),
@@ -683,7 +726,8 @@ def train():
         print('RENDER ONLY')
         if args.render_test:
             # render_test switches to test poses
-            images = images[i_test]
+            #images = images[i_test]
+            images = images
         else:
             # Default is smoother render_poses path
             images = None
@@ -844,31 +888,24 @@ def train():
 
         if i % args.i_video == 0 and i > 0:
 
-            rgbs, disps = render_path(
-                render_poses, hwf, args.chunk, render_kwargs_test)
+            rgbs, disps = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
             print('Done, saving', rgbs.shape, disps.shape)
-            moviebase = os.path.join(
-                basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-            imageio.mimwrite(moviebase + 'rgb.mp4',
-                             to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'disp.mp4',
-                             to8b(disps / np.max(disps)), fps=30, quality=8)
+            moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
+            imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
+            imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
 
             if args.use_viewdirs:
                 render_kwargs_test['c2w_staticcam'] = render_poses[0][:3, :4]
-                rgbs_still, _ = render_path(
-                    render_poses, hwf, args.chunk, render_kwargs_test)
+                rgbs_still, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
                 render_kwargs_test['c2w_staticcam'] = None
-                imageio.mimwrite(moviebase + 'rgb_still.mp4',
-                                 to8b(rgbs_still), fps=30, quality=8)
+                imageio.mimwrite(moviebase + 'rgb_still.mp4', to8b(rgbs_still), fps=30, quality=8)
 
         if i % args.i_testset == 0 and i > 0:
             testsavedir = os.path.join(
                 basedir, expname, 'testset_{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
-            render_path(poses[i_test], hwf, args.chunk, render_kwargs_test,
-                        gt_imgs=images[i_test], savedir=testsavedir)
+            render_path(poses[i_test], hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
 
         if i % args.i_print == 0 or i < 10:
@@ -924,5 +961,142 @@ def train():
         global_step.assign_add(1)
 
 
+def render_volume():
+    parser = config_parser()
+    args = parser.parse_args()
+
+    if args.random_seed is not None:
+        print('Fixing random seed', args.random_seed)
+        np.random.seed(args.random_seed)
+        tf.compat.v1.set_random_seed(args.random_seed)
+
+    # Load data
+
+    if args.dataset_type == 'llff':
+        images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
+                                                                  recenter=True, bd_factor=.75,
+                                                                  spherify=args.spherify)
+        hwf = poses[0, :3, -1]
+        poses = poses[:, :3, :4]
+        print('Loaded llff', images.shape,
+              render_poses.shape, hwf, args.datadir)
+        if not isinstance(i_test, list):
+            i_test = [i_test]
+
+        if args.llffhold > 0:
+            print('Auto LLFF holdout,', args.llffhold)
+            i_test = np.arange(images.shape[0])[::args.llffhold]
+
+        i_val = i_test
+        i_train = np.array([i for i in np.arange(int(images.shape[0])) if
+                            (i not in i_test and i not in i_val)])
+
+        print('DEFINING BOUNDS')
+        if args.no_ndc:
+            near = tf.reduce_min(bds) * .9
+            far = tf.reduce_max(bds) * 1.
+        else:
+            near = 0.
+            far = 1.
+        print('NEAR FAR', near, far)
+
+    elif args.dataset_type == 'blender':
+        images, poses, render_poses, hwf, i_split = load_blender_data(
+            args.datadir, args.half_res, args.testskip)
+        print('Loaded blender', images.shape,
+              render_poses.shape, hwf, args.datadir)
+        i_train, i_val, i_test = i_split
+
+        near = 2.
+        far = 6.
+
+        if args.white_bkgd:
+            images = images[..., :3] * images[..., -1:] + (1. - images[..., -1:])
+        else:
+            images = images[..., :3]
+
+    elif args.dataset_type == 'deepvoxels':
+
+        images, poses, render_poses, hwf, i_split = load_dv_data(scene=args.shape,
+                                                                 basedir=args.datadir,
+                                                                 testskip=args.testskip)
+
+        print('Loaded deepvoxels', images.shape,
+              render_poses.shape, hwf, args.datadir)
+        i_train, i_val, i_test = i_split
+
+        hemi_R = np.mean(np.linalg.norm(poses[:, :3, -1], axis=-1))
+        near = hemi_R - 1.
+        far = hemi_R + 1.
+
+    else:
+        print('Unknown dataset type', args.dataset_type, 'exiting')
+        return
+
+    # Cast intrinsics to right types
+    H, W, focal = hwf
+    H, W = int(H), int(W)
+    hwf = [H, W, focal]
+
+    if args.render_test:
+        render_poses = np.array(poses[i_test])
+
+    # Create log dir and copy the config file
+    basedir = args.basedir
+    expname = args.expname
+    os.makedirs(os.path.join(basedir, expname), exist_ok=True)
+    f = os.path.join(basedir, expname, 'args.txt')
+    with open(f, 'w') as file:
+        for arg in sorted(vars(args)):
+            attr = getattr(args, arg)
+            file.write('{} = {}\n'.format(arg, attr))
+    if args.config is not None:
+        f = os.path.join(basedir, expname, 'config.txt')
+        with open(f, 'w') as file:
+            file.write(open(args.config, 'r').read())
+
+    # Create nerf model
+    render_kwargs_train, render_kwargs_test, start, grad_vars, models = create_nerf(args)
+
+    bds_dict = {
+        'near': tf.cast(near, tf.float32),
+        'far': tf.cast(far, tf.float32),
+    }
+    render_kwargs_train.update(bds_dict)
+    render_kwargs_test.update(bds_dict)
+
+    # Short circuit if only rendering out from trained model
+    if args.render_only:
+        print('RENDER ONLY')
+        if args.render_test:
+            # render_test switches to test poses
+            # images = images[i_test]
+            images = images
+        else:
+            # Default is smoother render_poses path
+            images = None
+
+        testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{:06d}'.format(
+            'test' if args.render_test else 'path', start))
+        os.makedirs(testsavedir, exist_ok=True)
+        print('test poses shape', render_poses.shape)
+
+        rgbs, disps, depths = render_path_volume(render_poses, hwf, args.chunk,
+                                                 render_kwargs_test, gt_imgs=images,
+                                                 savedir=testsavedir, render_factor=args.render_factor)
+        #rgbs, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test,
+        #                      gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
+        print('Done rendering', testsavedir)
+        imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'),
+                         to8b(rgbs), fps=30, quality=10)
+        imageio.mimwrite(os.path.join(testsavedir, '_depth_video.mp4'),
+                         todepth(depths), fps=30, quality=10)
+
+        return
+
+
 if __name__ == '__main__':
-    train()
+    if False:
+        train()
+    else:
+        render_volume()

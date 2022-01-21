@@ -16,6 +16,11 @@ def mse2psnr(x): return -10.*tf.log(x)/tf.log(10.)
 
 def to8b(x): return (255*np.clip(x, 0, 1)).astype(np.uint8)
 
+def todepth(x):
+    depth = 255.0 * np.clip((1.0 - np.log(x+0.00001) / np.log(np.max(x[:])+0.00001)), 0, 1)
+    depth = depth.astype(np.uint8)
+    return depth
+
 
 # Positional encoding
 
@@ -86,7 +91,7 @@ def init_nerf_model(D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips
         input_ch), type(input_ch_views), use_viewdirs)
     input_ch = int(input_ch)
     input_ch_views = int(input_ch_views)
-
+    print(input_ch, input_ch_views, input_ch + input_ch_views)
     inputs = tf.keras.Input(shape=(input_ch + input_ch_views))
     inputs_pts, inputs_views = tf.split(inputs, [input_ch, input_ch_views], -1)
     inputs_pts.set_shape([None, input_ch])
@@ -121,7 +126,8 @@ def init_nerf_model(D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips
 # Ray helpers
 
 def get_rays(H, W, focal, c2w):
-    """Get ray origins, directions from a pinhole camera."""
+    """Get ray origins, directions from
+ a pinhole camera."""
     i, j = tf.meshgrid(tf.range(W, dtype=tf.float32),
                        tf.range(H, dtype=tf.float32), indexing='xy')
     dirs = tf.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -tf.ones_like(i)], -1)
