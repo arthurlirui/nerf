@@ -228,7 +228,22 @@ def render_rays(ray_batch,
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(
             raw, z_vals, rays_d)
 
-    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'depth_map': depth_map}
+    max_weight = tf.reduce_max(weights, axis=1)
+    indices = tf.argmax(weights, axis=1)
+    #pts_max = pts[max_weight_ind, :]
+
+    def manually_batched_gather(params, indices, axis):
+        batch_dims = 1
+        result = []
+        for p, i in zip(params, indices):
+            r = tf.gather(p, i, axis=axis - batch_dims)
+            result.append(r)
+        return tf.stack(result)
+    pts_max = manually_batched_gather(pts, indices, axis=1).numpy()
+
+
+    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'depth_map': depth_map,
+           'pts': pts_max, 'max_weight': max_weight}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -330,7 +345,7 @@ def render(H, W, focal,
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = tf.reshape(all_ret[k], k_sh)
 
-    k_extract = ['rgb_map', 'disp_map', 'acc_map', 'depth_map']
+    k_extract = ['rgb_map', 'disp_map', 'acc_map', 'depth_map', 'max_weight', 'pts']
     ret_list = [all_ret[k] for k in k_extract]
     ret_dict = {k: all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
@@ -387,15 +402,19 @@ def render_path_volume(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
     rgbs = []
     disps = []
     depths = []
+    max_weights = []
+    voxels = []
 
     t = time.time()
     for i, c2w in enumerate(render_poses):
         print(i, time.time() - t)
         t = time.time()
-        rgb, disp, acc, depth, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        rgb, disp, acc, depth, max_weight, pts, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
         rgbs.append(rgb.numpy())
         disps.append(disp.numpy())
         depths.append(depth.numpy())
+        max_weights.append(max_weight.numpy())
+        voxels.append(pts.numpy())
         if i == 0:
             print(rgb.shape, disp.shape, depth.shape)
 
@@ -415,8 +434,12 @@ def render_path_volume(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
     rgbs = np.stack(rgbs, 0)
     disps = np.stack(disps, 0)
     depths = np.stack(depths, 0)
+    max_weights = np.stack(max_weights, 0)
+    voxels = np.stack(voxels, 0)
+    print(max_weights.shape, voxels.shape)
 
-    return rgbs, disps, depths
+
+    return rgbs, disps, depths, max_weights, voxels
 
 
 def create_nerf(args):
@@ -1081,22 +1104,23 @@ def render_volume():
         os.makedirs(testsavedir, exist_ok=True)
         print('test poses shape', render_poses.shape)
 
-        rgbs, disps, depths = render_path_volume(render_poses, hwf, args.chunk,
-                                                 render_kwargs_test, gt_imgs=images,
-                                                 savedir=testsavedir, render_factor=args.render_factor)
+        rgbs, disps, depths, max_weights, voxels = render_path_volume(render_poses, hwf, args.chunk,
+                                                                      render_kwargs_test, gt_imgs=images,
+                                                                      savedir=testsavedir, render_factor=args.render_factor)
         #rgbs, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test,
         #                      gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
+
         print('Done rendering', testsavedir)
         imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'),
                          to8b(rgbs), fps=30, quality=10)
         imageio.mimwrite(os.path.join(testsavedir, '_depth_video.mp4'),
                          todepth(depths), fps=30, quality=10)
+        np.save(file=os.path.join(testsavedir, 'max_weight.npy'), arr=max_weights)
+        np.save(file=os.path.join(testsavedir, 'voxels.npy'), arr=voxels)
 
         return
 
 
 if __name__ == '__main__':
-    if False:
-        train()
-    else:
-        render_volume()
+    train()
+    render_volume()
