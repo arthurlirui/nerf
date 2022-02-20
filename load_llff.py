@@ -87,7 +87,7 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     
     imgdir = os.path.join(basedir, 'images' + sfx)
     if not os.path.exists(imgdir):
-        print( imgdir, 'does not exist, returning' )
+        print(imgdir, 'does not exist, returning')
         return
     
     imgfiles = [os.path.join(imgdir, f) for f in sorted(os.listdir(imgdir)) if f.endswith('JPG') or f.endswith('jpg') or f.endswith('png')]
@@ -135,16 +135,12 @@ def ptstocam(pts, c2w):
     return tt
 
 def poses_avg(poses):
-
     hwf = poses[0, :3, -1:]
-
     center = poses[:, :3, 3].mean(0)
     vec2 = normalize(poses[:, :3, 2].sum(0))
     up = poses[:, :3, 1].sum(0)
     c2w = np.concatenate([viewmatrix(vec2, up, center), hwf], 1)
-    
     return c2w
-
 
 
 def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
@@ -166,7 +162,7 @@ def recenter_poses(poses):
     bottom = np.reshape([0,0,0,1.], [1,4])
     c2w = poses_avg(poses)
     c2w = np.concatenate([c2w[:3,:4], bottom], -2)
-    bottom = np.tile(np.reshape(bottom, [1,1,4]), [poses.shape[0],1,1])
+    bottom = np.tile(np.reshape(bottom, [1, 1, 4]), [poses.shape[0],1,1])
     poses = np.concatenate([poses[:,:3,:4], bottom], -2)
 
     poses = np.linalg.inv(c2w) @ poses
@@ -238,8 +234,6 @@ def spherify_poses(poses, bds):
     
 
 def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_zflat=False):
-    
-
     poses, bds, imgs = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
     print('Loaded', basedir, bds.min(), bds.max())
     
@@ -260,19 +254,22 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         
     if spherify:
         poses, render_poses, bds = spherify_poses(poses, bds)
-
+        print(poses)
     else:
         
         c2w = poses_avg(poses)
+        print(c2w)
+        #c2w[:3, 3:4] = c2w[:3, 3:4]*
         print('recentered', c2w.shape)
-        print(c2w[:3,:4])
+        print(c2w[:3, :4])
 
         ## Get spiral
         # Get average pose
         up = normalize(poses[:, :3, 1].sum(0))
 
         # Find a reasonable "focus depth" for this dataset
-        close_depth, inf_depth = bds.min()*.9, bds.max()*5.
+        #close_depth, inf_depth = bds.min()*.9, bds.max()*5.
+        close_depth, inf_depth = bds.min() * .9, bds.max() * 5.
         dt = .75
         mean_dz = 1./(((1.-dt)/close_depth + dt/inf_depth))
         focal = mean_dz

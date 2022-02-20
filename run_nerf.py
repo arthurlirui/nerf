@@ -427,18 +427,19 @@ def render_path_volume(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, rgb8)
 
-            depth8 = todepth(depths[-1])
+            depth8 = to8b(depths[-1])
             filename = os.path.join(savedir, '{:03d}_depth.png'.format(i))
             imageio.imwrite(filename, depth8)
+
+            filename = os.path.join(savedir, '{:03d}_depth.npy'.format(i))
+            np.save(file=filename, arr=depths[-1])
 
     rgbs = np.stack(rgbs, 0)
     disps = np.stack(disps, 0)
     depths = np.stack(depths, 0)
     max_weights = np.stack(max_weights, 0)
     voxels = np.stack(voxels, 0)
-    print(max_weights.shape, voxels.shape)
-
-
+    print(rgbs.shape, depths.shape, max_weights.shape, voxels.shape)
     return rgbs, disps, depths, max_weights, voxels
 
 
@@ -661,6 +662,7 @@ def train():
               render_poses.shape, hwf, args.datadir)
         if not isinstance(i_test, list):
             i_test = [i_test]
+        print(i_test)
 
         if args.llffhold > 0:
             print('Auto LLFF holdout,', args.llffhold)
@@ -669,7 +671,8 @@ def train():
         i_val = i_test
         i_train = np.array([i for i in np.arange(int(images.shape[0])) if
                             (i not in i_test and i not in i_val)])
-
+        i_test = i_train
+        print('test', i_test)
         print('DEFINING BOUNDS')
         if args.no_ndc:
             near = tf.reduce_min(bds) * .9
@@ -993,7 +996,6 @@ def render_volume():
         tf.compat.v1.set_random_seed(args.random_seed)
 
     # Load data
-
     if args.dataset_type == 'llff':
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
                                                                   recenter=True, bd_factor=.75,
@@ -1013,6 +1015,8 @@ def render_volume():
         i_train = np.array([i for i in np.arange(int(images.shape[0])) if
                             (i not in i_test and i not in i_val)])
 
+        i_test = i_train
+        print(i_test)
         print('DEFINING BOUNDS')
         if args.no_ndc:
             near = tf.reduce_min(bds) * .9
@@ -1113,7 +1117,7 @@ def render_volume():
         imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'),
                          to8b(rgbs), fps=30, quality=10)
         imageio.mimwrite(os.path.join(testsavedir, '_depth_video.mp4'),
-                         todepth(depths), fps=30, quality=10)
+                         to8b(depths), fps=30, quality=10)
         np.save(file=os.path.join(testsavedir, 'max_weight.npy'), arr=max_weights)
         np.save(file=os.path.join(testsavedir, 'voxels.npy'), arr=voxels)
 
@@ -1122,4 +1126,4 @@ def render_volume():
 
 if __name__ == '__main__':
     train()
-    render_volume()
+    #render_volume()

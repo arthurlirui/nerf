@@ -76,9 +76,25 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     camera_angle_x = float(meta['camera_angle_x'])
     focal = .5 * W / np.tan(.5 * camera_angle_x)
 
-    num_poses = 40
-    render_poses = tf.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, num_poses+1)[:-1]], 0)
-    
+    if False:
+        num_poses = 24
+        render_poses0 = tf.stack(
+            [pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, num_poses + 1)[:-1]], 0)
+        render_poses1 = tf.stack(
+            [pose_spherical(angle, -30.0, 3.0) for angle in np.linspace(-180, 180, num_poses + 1)[:-1]], 0)
+        render_poses2 = tf.stack(
+            [pose_spherical(angle, -30.0, 2.5) for angle in np.linspace(-180, 180, num_poses + 1)[:-1]], 0)
+        render_poses = tf.concat([render_poses0, render_poses1, render_poses2], 0)
+
+    if True:
+        num_poses = 240
+        max_dist = 4.0
+        poses = []
+        for i, angle in enumerate(np.linspace(-180, 180, num_poses + 1)[:-1]):
+            poses.append(pose_spherical(angle, -30.0, max_dist*(0.5+0.5*(num_poses-i)/num_poses)))
+        render_poses = tf.stack(poses, 0)
+        #render_poses = tf.stack([pose_spherical(angle, -30.0, 4.0*(0.5+0.5*(num_poses-i)/num_poses)) for angle in np.linspace(-180, 180, num_poses + 1)[:-1]], 0)
+
     if half_res:
         imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
         H = H//2
